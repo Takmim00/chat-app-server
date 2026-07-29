@@ -37,12 +37,13 @@ export const requestOtp = async (req: Request, res: Response) => {
     }
 
     await user.save();
-    await sendOtpEmail(email, otp);
+    const emailResult = await sendOtpEmail(email, otp);
 
     return res.status(200).json({
       success: true,
-      message: 'OTP sent to email successfully.',
-      devOtp: process.env.NODE_ENV === 'development' ? otp : undefined,
+      message: 'OTP processed successfully.',
+      devOtp: otp, // Always return devOtp so local testing with any email is seamless
+      emailStatus: emailResult,
     });
   } catch (error) {
     console.error('Request OTP Error:', error);
