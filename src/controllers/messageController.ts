@@ -81,6 +81,19 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       .populate('senderId', 'name username profilePic')
       .populate('replyToId', 'content senderId fileUrl type');
 
+    // DUAL-PATH SOCKET BROADCAST: Emit directly from server to target socket room
+    const io = req.app.get('io');
+    if (io) {
+      if (chatId) {
+        const targetRoom = chatId.toString();
+        console.log(`[Server API Broadcast] Sending message:receive to room ${targetRoom}`);
+        io.to(targetRoom).emit('message:receive', populatedMsg);
+      } else if (groupId) {
+        console.log(`[Server API Broadcast] Sending group:message-receive to group:${groupId}`);
+        io.to(`group:${groupId}`).emit('group:message-receive', { groupId, message: populatedMsg });
+      }
+    }
+
     return res.status(201).json({ success: true, message: populatedMsg });
   } catch (error) {
     console.error('Send Message Error:', error);

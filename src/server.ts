@@ -28,7 +28,6 @@ const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
-      // Allow all client origins (Vercel, Localhost, Mobile)
       callback(null, true);
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
@@ -37,6 +36,9 @@ const io = new Server(server, {
   pingTimeout: 60000,
   pingInterval: 25000,
 });
+
+// Attach io to Express app for server-side socket broadcasts
+app.set('io', io);
 
 // Connect Database
 connectDB();
