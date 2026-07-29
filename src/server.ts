@@ -20,14 +20,22 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
+// Enable trust proxy for Render / Cloudflare / Vercel reverse proxies
+app.set('trust proxy', 1);
+
 const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
 
 const io = new Server(server, {
   cors: {
-    origin: [clientUrl, 'http://localhost:3000'],
+    origin: (origin, callback) => {
+      // Allow all client origins (Vercel, Localhost, Mobile)
+      callback(null, true);
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true,
   },
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
 
 // Connect Database
@@ -36,7 +44,9 @@ connectDB();
 // Global Middlewares
 app.use(
   cors({
-    origin: [clientUrl, 'http://localhost:3000'],
+    origin: (origin, callback) => {
+      callback(null, true);
+    },
     credentials: true,
   })
 );
