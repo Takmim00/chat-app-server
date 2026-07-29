@@ -70,6 +70,13 @@ export const sendFriendRequest = async (req: AuthRequest, res: Response) => {
       existingRequest.receiverId = receiverId as any;
       existingRequest.status = 'pending';
       await existingRequest.save();
+
+      // Emit real-time notification
+      const io = req.app.get('io');
+      if (io) {
+        io.to(receiverId.toString()).emit('friend:request-received', { senderId });
+      }
+
       return res.status(200).json({ success: true, message: 'Friend request sent.', request: existingRequest });
     }
 
@@ -78,6 +85,12 @@ export const sendFriendRequest = async (req: AuthRequest, res: Response) => {
       receiverId,
       status: 'pending',
     });
+
+    // Emit real-time notification to receiver
+    const io = req.app.get('io');
+    if (io) {
+      io.to(receiverId.toString()).emit('friend:request-received', { senderId });
+    }
 
     return res.status(201).json({
       success: true,
@@ -106,6 +119,14 @@ export const acceptFriendRequest = async (req: AuthRequest, res: Response) => {
     // Add each other to friends array
     await User.findByIdAndUpdate(request.senderId, { $addToSet: { friends: request.receiverId } });
     await User.findByIdAndUpdate(request.receiverId, { $addToSet: { friends: request.senderId } });
+
+    // REAL-TIME BROADCAST: Notify both users that friend request is accepted
+    const io = req.app.get('io');
+    if (io) {
+      console.log(`[Friend Socket] Emitting friend:accepted to ${request.senderId} and ${request.receiverId}`);
+      io.to(request.senderId.toString()).emit('friend:accepted', { friendId: request.receiverId });
+      io.to(request.receiverId.toString()).emit('friend:accepted', { friendId: request.senderId });
+    }
 
     return res.status(200).json({ success: true, message: 'Friend request accepted.' });
   } catch (error) {
