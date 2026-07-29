@@ -16,7 +16,7 @@ export const setupSocketIO = (io: Server) => {
         return next(new Error('Authentication token required'));
       }
       const decoded = verifyToken(token);
-      socket.data.userId = decoded.userId;
+      socket.data.userId = decoded.userId.toString();
       next();
     } catch (err) {
       next(new Error('Authentication error'));
@@ -27,6 +27,7 @@ export const setupSocketIO = (io: Server) => {
     const userId = socket.data.userId;
     if (!userId) return;
 
+    // Register user in room & online map
     onlineUsers.set(userId, socket.id);
     socket.join(userId);
 
@@ -34,41 +35,39 @@ export const setupSocketIO = (io: Server) => {
     await User.findByIdAndUpdate(userId, { isOnline: true, lastSeen: new Date() });
     io.emit('user:online', { userId, isOnline: true, lastSeen: new Date() });
 
-    console.log(`[Socket Connected] User ${userId} with Socket ID ${socket.id}`);
+    console.log(`[Socket Connected] User ${userId} joined room ${userId} with Socket ID ${socket.id}`);
 
-    // Direct Messaging Events
+    // Direct Messaging Events (Emit to target user room + socket ID)
     socket.on('message:send', async (data) => {
       const { receiverId, message } = data;
-      const receiverSocketId = onlineUsers.get(receiverId);
+      if (!receiverId) return;
 
-      if (receiverSocketId) {
-        io.to(receiverSocketId).emit('message:receive', message);
-        // Automatically mark as delivered if receiver is online
-        io.to(socket.id).emit('message:delivered', { messageId: message._id, receiverId });
-      }
+      const targetId = receiverId.toString();
+      console.log(`[Socket message:send] From ${userId} to target room ${targetId}`);
+
+      // Emit to room (reaches all open tabs of receiver)
+      io.to(targetId).emit('message:receive', message);
+
+      // Notify sender of delivery confirmation
+      socket.emit('message:delivered', { messageId: message._id, receiverId: targetId });
     });
 
     socket.on('typing:start', ({ receiverId }) => {
-      const receiverSocketId = onlineUsers.get(receiverId);
-      if (receiverSocketId) {
-        io.to(receiverSocketId).emit('typing:start', { senderId: userId });
-      }
+      if (!receiverId) return;
+      io.to(receiverId.toString()).emit('typing:start', { senderId: userId });
     });
 
     socket.on('typing:stop', ({ receiverId }) => {
-      const receiverSocketId = onlineUsers.get(receiverId);
-      if (receiverSocketId) {
-        io.to(receiverSocketId).emit('typing:stop', { senderId: userId });
-      }
+      if (!receiverId) return;
+      io.to(receiverId.toString()).emit('typing:stop', { senderId: userId });
     });
 
     socket.on('message:seen', async ({ messageId, senderId }) => {
       await Message.findByIdAndUpdate(messageId, {
         $addToSet: { seenBy: { userId, timestamp: new Date() } },
       });
-      const senderSocketId = onlineUsers.get(senderId);
-      if (senderSocketId) {
-        io.to(senderSocketId).emit('message:seen', { messageId, seenByUserId: userId });
+      if (senderId) {
+        io.to(senderId.toString()).emit('message:seen', { messageId, seenByUserId: userId });
       }
     });
 
