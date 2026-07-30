@@ -91,6 +91,14 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       } else if (groupId) {
         console.log(`[Server API Broadcast] Sending group:message-receive to group:${groupId}`);
         io.to(`group:${groupId}`).emit('group:message-receive', { groupId, message: populatedMsg });
+        
+        // Also notify all member personal rooms for unread badges
+        const group = await Group.findById(groupId);
+        if (group) {
+          group.members.forEach((memberId) => {
+            io.to(memberId.toString()).emit('group:message-receive', { groupId, message: populatedMsg });
+          });
+        }
       }
     }
 
