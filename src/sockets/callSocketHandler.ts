@@ -9,30 +9,21 @@ export const handleCallSockets = (
 ) => {
   const currentUserId = socket.data.userId;
 
-  // Helper: emit to a target user via BOTH room and direct socket ID
-  const emitToUser = (targetUserId: string, event: string, payload: any) => {
+  // Helper: Emit targeted event cleanly to receiver's user room (reaches all active sockets of that user once)
+  const emitToUserRoom = (targetUserId: string, event: string, payload: any) => {
+    if (!targetUserId) return;
     const targetRoom = targetUserId.toString();
-    const targetSocketId = onlineUsers.get(targetRoom);
-    
-    // Method 1: Room-based emission
     io.to(targetRoom).emit(event, payload);
-    
-    // Method 2: Direct socket ID fallback
-    if (targetSocketId) {
-      io.to(targetSocketId).emit(event, payload);
-    }
-    
-    console.log(`[Call Emit] Event "${event}" -> user ${targetRoom} (socketId: ${targetSocketId || 'N/A'})`);
+    console.log(`[Call Socket] Event "${event}" sent to room ${targetRoom}`);
   };
 
-  // Initiate call — emit IMMEDIATELY, then enrich caller info async
+  // Initiate call — Emit call:incoming to receiver
   socket.on('call:initiate', ({ receiverId, callerInfo }) => {
     if (!receiverId) return;
     const targetRoom = receiverId.toString();
 
     console.log(`[Socket Call Initiate] From ${currentUserId} to ${targetRoom}`);
 
-    // Build caller info from whatever the client sent — emit INSTANTLY (no async delay)
     const immediateCaller = {
       _id: callerInfo?._id?.toString?.() || callerInfo?._id || currentUserId,
       name: callerInfo?.name || callerInfo?.username || 'Unknown Caller',
@@ -50,11 +41,11 @@ export const handleCallSockets = (
       receiverId: targetRoom,
     };
 
-    // Emit call:incoming IMMEDIATELY — no async delay
-    emitToUser(targetRoom, 'call:incoming', payload);
+    // Emit to receiver's room
+    emitToUserRoom(targetRoom, 'call:incoming', payload);
     socket.emit('call:ringing', { receiverId: targetRoom });
 
-    // Optionally enrich caller info from DB in background (no await)
+    // Optional background enrichment
     User.findById(currentUserId).select('name username profilePic friendId').then((dbCaller) => {
       if (dbCaller) {
         const enrichedPayload = {
@@ -68,8 +59,7 @@ export const handleCallSockets = (
             email: '',
           },
         };
-        // Send enriched info as an update (client will use latest)
-        emitToUser(targetRoom, 'call:incoming', enrichedPayload);
+        emitToUserRoom(targetRoom, 'call:incoming', enrichedPayload);
       }
     }).catch(() => {});
   });
@@ -85,7 +75,7 @@ export const handleCallSockets = (
     };
 
     console.log(`[Socket Call Accept] From ${currentUserId} to caller ${targetRoom}`);
-    emitToUser(targetRoom, 'call:accepted', payload);
+    emitToUserRoom(targetRoom, 'call:accepted', payload);
   });
 
   // Reject Call
@@ -99,7 +89,7 @@ export const handleCallSockets = (
     };
 
     console.log(`[Socket Call Reject] From ${currentUserId} to caller ${targetRoom}`);
-    emitToUser(targetRoom, 'call:rejected', payload);
+    emitToUserRoom(targetRoom, 'call:rejected', payload);
 
     await CallLog.create({
       callerId,
@@ -120,8 +110,8 @@ export const handleCallSockets = (
     };
 
     console.log(`[Socket Call End] From ${currentUserId} to partner ${targetRoom}`);
-    // Only emit to the PARTNER — NOT back to the caller
-    emitToUser(targetRoom, 'call:ended', payload);
+    // Emit call:ended ONLY to the partner's room (not back to sender)
+    emitToUserRoom(targetRoom, 'call:ended', payload);
 
     await CallLog.create({
       callerId: currentUserId,
@@ -132,25 +122,27 @@ export const handleCallSockets = (
     }).catch(() => {});
   });
 
-  // WebRTC Signaling — room + direct socket ID
+  // WebRTC Offer
   socket.on('call:offer', ({ to, offer }) => {
-    if (!to) return;
+    if (!to || !offer) return;
     const targetRoom = to.toString();
     const payload = { from: currentUserId, to: targetRoom, offer, targetReceiverId: targetRoom };
-    emitToUser(targetRoom, 'call:offer', payload);
+    emitToUserRoom(targetRoom, 'call:offer', payload);
   });
 
+  // WebRTC Answer
   socket.on('call:answer', ({ to, answer }) => {
-    if (!to) return;
+    if (!to || !answer) return;
     const targetRoom = to.toString();
     const payload = { from: currentUserId, to: targetRoom, answer, targetReceiverId: targetRoom };
-    emitToUser(targetRoom, 'call:answer', payload);
+    emitToUserRoom(targetRoom, 'call:answer', payload);
   });
 
+  // WebRTC ICE Candidate
   socket.on('call:ice-candidate', ({ to, candidate }) => {
-    if (!to) return;
+    if (!to || !candidate) return;
     const targetRoom = to.toString();
     const payload = { from: currentUserId, to: targetRoom, candidate, targetReceiverId: targetRoom };
-    emitToUser(targetRoom, 'call:ice-candidate', payload);
+    emitToUserRoom(targetRoom, 'call:ice-candidate', payload);
   });
 };
