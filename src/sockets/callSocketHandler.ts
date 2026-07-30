@@ -24,14 +24,23 @@ export const handleCallSockets = (
       }
     }
 
-    console.log(`[Socket Call Initiate] From ${currentUserId} to room ${targetRoom}`);
+    const targetSocketId = onlineUsers.get(targetRoom);
+    console.log(`[Socket Call Initiate] From ${currentUserId} to room ${targetRoom}, targetSocket: ${targetSocketId}`);
 
-    // Send incoming call notification to target receiver user room
+    // Send incoming call notification to target receiver user room & socket ID
     io.to(targetRoom).emit('call:incoming', {
       callerId: currentUserId,
       callerInfo: fullCaller,
       callType: 'voice',
     });
+
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('call:incoming', {
+        callerId: currentUserId,
+        callerInfo: fullCaller,
+        callType: 'voice',
+      });
+    }
 
     // Notify caller that receiver is ringing
     socket.emit('call:ringing', { receiverId: targetRoom });
