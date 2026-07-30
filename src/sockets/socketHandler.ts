@@ -76,10 +76,14 @@ export const setupSocketIO = (io: Server) => {
     handleGroupSockets(io, socket, onlineUsers);
 
     socket.on('disconnect', async () => {
-      onlineUsers.delete(userId);
+      // Only remove from onlineUsers if THIS socket is still the registered one
+      // (prevents race condition where a reconnected socket's entry gets deleted by the old socket)
+      if (onlineUsers.get(userId) === socket.id) {
+        onlineUsers.delete(userId);
+      }
       await User.findByIdAndUpdate(userId, { isOnline: false, lastSeen: new Date() });
       io.emit('user:offline', { userId, isOnline: false, lastSeen: new Date() });
-      console.log(`[Socket Disconnected] User ${userId}`);
+      console.log(`[Socket Disconnected] User ${userId} (Socket ${socket.id})`);
     });
   });
 };

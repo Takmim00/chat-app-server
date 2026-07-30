@@ -9,62 +9,75 @@ export const handleCallSockets = (
 ) => {
   const currentUserId = socket.data.userId;
 
-  // Initiate call
-  socket.on('call:initiate', async ({ receiverId, callerInfo }) => {
+  // Helper: emit to a target user via BOTH room and direct socket ID
+  const emitToUser = (targetUserId: string, event: string, payload: any) => {
+    const targetRoom = targetUserId.toString();
+    const targetSocketId = onlineUsers.get(targetRoom);
+    
+    // Method 1: Room-based emission
+    io.to(targetRoom).emit(event, payload);
+    
+    // Method 2: Direct socket ID fallback
+    if (targetSocketId) {
+      io.to(targetSocketId).emit(event, payload);
+    }
+    
+    console.log(`[Call Emit] Event "${event}" -> user ${targetRoom} (socketId: ${targetSocketId || 'N/A'})`);
+  };
+
+  // Initiate call — emit IMMEDIATELY, then enrich caller info async
+  socket.on('call:initiate', ({ receiverId, callerInfo }) => {
     if (!receiverId) return;
     const targetRoom = receiverId.toString();
 
-    // Always fetch caller info from DB to guarantee completeness
-    let fullCaller = callerInfo;
-    try {
-      const dbCaller = await User.findById(currentUserId).select('name username profilePic friendId');
-      if (dbCaller) {
-        fullCaller = {
-          _id: dbCaller._id?.toString() || currentUserId,
-          name: dbCaller.name || callerInfo?.name || 'Unknown',
-          username: dbCaller.username || callerInfo?.username || '',
-          profilePic: dbCaller.profilePic || callerInfo?.profilePic || '',
-          friendId: dbCaller.friendId || callerInfo?.friendId || '',
-        };
-      }
-    } catch (err) {
-      console.error('[Call Initiate] Failed to fetch caller info from DB:', err);
-      // Ensure fallback callerInfo always has required fields
-      if (!fullCaller || !fullCaller.name) {
-        fullCaller = {
-          _id: currentUserId,
-          name: callerInfo?.name || callerInfo?.username || 'Unknown Caller',
-          username: callerInfo?.username || '',
-          profilePic: callerInfo?.profilePic || '',
-        };
-      }
-    }
+    console.log(`[Socket Call Initiate] From ${currentUserId} to ${targetRoom}`);
 
-    const targetSocketId = onlineUsers.get(targetRoom);
-    console.log(`[Socket Call Initiate] From ${currentUserId} to targetRoom ${targetRoom}, targetSocket: ${targetSocketId}`);
+    // Build caller info from whatever the client sent — emit INSTANTLY (no async delay)
+    const immediateCaller = {
+      _id: callerInfo?._id?.toString?.() || callerInfo?._id || currentUserId,
+      name: callerInfo?.name || callerInfo?.username || 'Unknown Caller',
+      username: callerInfo?.username || callerInfo?.name || '',
+      profilePic: callerInfo?.profilePic || '',
+      friendId: callerInfo?.friendId || '',
+      email: callerInfo?.email || '',
+    };
 
     const payload = {
       callerId: currentUserId,
-      callerInfo: fullCaller,
+      callerInfo: immediateCaller,
       callType: 'voice',
       targetReceiverId: targetRoom,
       receiverId: targetRoom,
     };
 
-    // Emit to the targeted receiver's room
-    io.to(targetRoom).emit('call:incoming', payload);
-    // Also emit directly to their socket ID as fallback (in case room emission fails)
-    if (targetSocketId) {
-      io.to(targetSocketId).emit('call:incoming', payload);
-    }
+    // Emit call:incoming IMMEDIATELY — no async delay
+    emitToUser(targetRoom, 'call:incoming', payload);
     socket.emit('call:ringing', { receiverId: targetRoom });
+
+    // Optionally enrich caller info from DB in background (no await)
+    User.findById(currentUserId).select('name username profilePic friendId').then((dbCaller) => {
+      if (dbCaller) {
+        const enrichedPayload = {
+          ...payload,
+          callerInfo: {
+            _id: dbCaller._id?.toString() || currentUserId,
+            name: dbCaller.name || immediateCaller.name,
+            username: dbCaller.username || immediateCaller.username,
+            profilePic: dbCaller.profilePic || immediateCaller.profilePic,
+            friendId: dbCaller.friendId || immediateCaller.friendId,
+            email: '',
+          },
+        };
+        // Send enriched info as an update (client will use latest)
+        emitToUser(targetRoom, 'call:incoming', enrichedPayload);
+      }
+    }).catch(() => {});
   });
 
   // Accept Call
   socket.on('call:accept', ({ callerId }) => {
     if (!callerId) return;
     const targetRoom = callerId.toString();
-    const targetSocketId = onlineUsers.get(targetRoom);
     const payload = {
       receiverId: currentUserId,
       callerId: targetRoom,
@@ -72,17 +85,13 @@ export const handleCallSockets = (
     };
 
     console.log(`[Socket Call Accept] From ${currentUserId} to caller ${targetRoom}`);
-    io.to(targetRoom).emit('call:accepted', payload);
-    if (targetSocketId) {
-      io.to(targetSocketId).emit('call:accepted', payload);
-    }
+    emitToUser(targetRoom, 'call:accepted', payload);
   });
 
   // Reject Call
   socket.on('call:reject', async ({ callerId }) => {
     if (!callerId) return;
     const targetRoom = callerId.toString();
-    const targetSocketId = onlineUsers.get(targetRoom);
     const payload = {
       receiverId: currentUserId,
       callerId: targetRoom,
@@ -90,10 +99,7 @@ export const handleCallSockets = (
     };
 
     console.log(`[Socket Call Reject] From ${currentUserId} to caller ${targetRoom}`);
-    io.to(targetRoom).emit('call:rejected', payload);
-    if (targetSocketId) {
-      io.to(targetSocketId).emit('call:rejected', payload);
-    }
+    emitToUser(targetRoom, 'call:rejected', payload);
 
     await CallLog.create({
       callerId,
@@ -107,7 +113,6 @@ export const handleCallSockets = (
   socket.on('call:end', async ({ partnerId, duration }) => {
     if (!partnerId) return;
     const targetRoom = partnerId.toString();
-    const targetSocketId = onlineUsers.get(targetRoom);
     const payload = {
       endedBy: currentUserId,
       partnerId: targetRoom,
@@ -115,11 +120,8 @@ export const handleCallSockets = (
     };
 
     console.log(`[Socket Call End] From ${currentUserId} to partner ${targetRoom}`);
-    // Only emit to the PARTNER — NOT back to the caller who initiated the end
-    io.to(targetRoom).emit('call:ended', payload);
-    if (targetSocketId) {
-      io.to(targetSocketId).emit('call:ended', payload);
-    }
+    // Only emit to the PARTNER — NOT back to the caller
+    emitToUser(targetRoom, 'call:ended', payload);
 
     await CallLog.create({
       callerId: currentUserId,
@@ -130,37 +132,25 @@ export const handleCallSockets = (
     }).catch(() => {});
   });
 
-  // WebRTC Signaling Exchanges — room + direct socket ID fallback
+  // WebRTC Signaling — room + direct socket ID
   socket.on('call:offer', ({ to, offer }) => {
     if (!to) return;
     const targetRoom = to.toString();
-    const targetSocketId = onlineUsers.get(targetRoom);
     const payload = { from: currentUserId, to: targetRoom, offer, targetReceiverId: targetRoom };
-    io.to(targetRoom).emit('call:offer', payload);
-    if (targetSocketId) {
-      io.to(targetSocketId).emit('call:offer', payload);
-    }
+    emitToUser(targetRoom, 'call:offer', payload);
   });
 
   socket.on('call:answer', ({ to, answer }) => {
     if (!to) return;
     const targetRoom = to.toString();
-    const targetSocketId = onlineUsers.get(targetRoom);
     const payload = { from: currentUserId, to: targetRoom, answer, targetReceiverId: targetRoom };
-    io.to(targetRoom).emit('call:answer', payload);
-    if (targetSocketId) {
-      io.to(targetSocketId).emit('call:answer', payload);
-    }
+    emitToUser(targetRoom, 'call:answer', payload);
   });
 
   socket.on('call:ice-candidate', ({ to, candidate }) => {
     if (!to) return;
     const targetRoom = to.toString();
-    const targetSocketId = onlineUsers.get(targetRoom);
     const payload = { from: currentUserId, to: targetRoom, candidate, targetReceiverId: targetRoom };
-    io.to(targetRoom).emit('call:ice-candidate', payload);
-    if (targetSocketId) {
-      io.to(targetSocketId).emit('call:ice-candidate', payload);
-    }
+    emitToUser(targetRoom, 'call:ice-candidate', payload);
   });
 };
