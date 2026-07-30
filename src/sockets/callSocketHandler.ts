@@ -14,17 +14,34 @@ export const handleCallSockets = (
     if (!receiverId) return;
     const targetRoom = receiverId.toString();
 
+    // Always fetch caller info from DB to guarantee completeness
     let fullCaller = callerInfo;
-    if (!fullCaller || !fullCaller._id || !fullCaller.name) {
-      try {
-        const dbCaller = await User.findById(currentUserId).select('name username profilePic friendId');
-        if (dbCaller) fullCaller = dbCaller;
-      } catch (err) {
-        console.error('Failed to fetch caller info:', err);
+    try {
+      const dbCaller = await User.findById(currentUserId).select('name username profilePic friendId');
+      if (dbCaller) {
+        fullCaller = {
+          _id: dbCaller._id?.toString() || currentUserId,
+          name: dbCaller.name || callerInfo?.name || 'Unknown',
+          username: dbCaller.username || callerInfo?.username || '',
+          profilePic: dbCaller.profilePic || callerInfo?.profilePic || '',
+          friendId: dbCaller.friendId || callerInfo?.friendId || '',
+        };
+      }
+    } catch (err) {
+      console.error('[Call Initiate] Failed to fetch caller info from DB:', err);
+      // Ensure fallback callerInfo always has required fields
+      if (!fullCaller || !fullCaller.name) {
+        fullCaller = {
+          _id: currentUserId,
+          name: callerInfo?.name || callerInfo?.username || 'Unknown Caller',
+          username: callerInfo?.username || '',
+          profilePic: callerInfo?.profilePic || '',
+        };
       }
     }
 
-    console.log(`[Socket Call Initiate] From ${currentUserId} to targetRoom ${targetRoom}`);
+    const targetSocketId = onlineUsers.get(targetRoom);
+    console.log(`[Socket Call Initiate] From ${currentUserId} to targetRoom ${targetRoom}, targetSocket: ${targetSocketId}`);
 
     const payload = {
       callerId: currentUserId,
@@ -34,8 +51,12 @@ export const handleCallSockets = (
       receiverId: targetRoom,
     };
 
-    // Only emit to the targeted receiver's room
+    // Emit to the targeted receiver's room
     io.to(targetRoom).emit('call:incoming', payload);
+    // Also emit directly to their socket ID as fallback (in case room emission fails)
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('call:incoming', payload);
+    }
     socket.emit('call:ringing', { receiverId: targetRoom });
   });
 
@@ -43,6 +64,7 @@ export const handleCallSockets = (
   socket.on('call:accept', ({ callerId }) => {
     if (!callerId) return;
     const targetRoom = callerId.toString();
+    const targetSocketId = onlineUsers.get(targetRoom);
     const payload = {
       receiverId: currentUserId,
       callerId: targetRoom,
@@ -50,14 +72,17 @@ export const handleCallSockets = (
     };
 
     console.log(`[Socket Call Accept] From ${currentUserId} to caller ${targetRoom}`);
-    // Only emit to the caller's room
     io.to(targetRoom).emit('call:accepted', payload);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('call:accepted', payload);
+    }
   });
 
   // Reject Call
   socket.on('call:reject', async ({ callerId }) => {
     if (!callerId) return;
     const targetRoom = callerId.toString();
+    const targetSocketId = onlineUsers.get(targetRoom);
     const payload = {
       receiverId: currentUserId,
       callerId: targetRoom,
@@ -65,8 +90,10 @@ export const handleCallSockets = (
     };
 
     console.log(`[Socket Call Reject] From ${currentUserId} to caller ${targetRoom}`);
-    // Only emit to the caller's room
     io.to(targetRoom).emit('call:rejected', payload);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('call:rejected', payload);
+    }
 
     await CallLog.create({
       callerId,
@@ -80,6 +107,7 @@ export const handleCallSockets = (
   socket.on('call:end', async ({ partnerId, duration }) => {
     if (!partnerId) return;
     const targetRoom = partnerId.toString();
+    const targetSocketId = onlineUsers.get(targetRoom);
     const payload = {
       endedBy: currentUserId,
       partnerId: targetRoom,
@@ -87,10 +115,11 @@ export const handleCallSockets = (
     };
 
     console.log(`[Socket Call End] From ${currentUserId} to partner ${targetRoom}`);
-    // Emit to the partner's room
+    // Only emit to the PARTNER — NOT back to the caller who initiated the end
     io.to(targetRoom).emit('call:ended', payload);
-    // Also confirm back to the caller that the call has ended
-    socket.emit('call:ended', { ...payload, targetPartnerId: currentUserId });
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('call:ended', payload);
+    }
 
     await CallLog.create({
       callerId: currentUserId,
@@ -101,25 +130,37 @@ export const handleCallSockets = (
     }).catch(() => {});
   });
 
-  // WebRTC Signaling Exchanges — only send to targeted user
+  // WebRTC Signaling Exchanges — room + direct socket ID fallback
   socket.on('call:offer', ({ to, offer }) => {
     if (!to) return;
     const targetRoom = to.toString();
+    const targetSocketId = onlineUsers.get(targetRoom);
     const payload = { from: currentUserId, to: targetRoom, offer, targetReceiverId: targetRoom };
     io.to(targetRoom).emit('call:offer', payload);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('call:offer', payload);
+    }
   });
 
   socket.on('call:answer', ({ to, answer }) => {
     if (!to) return;
     const targetRoom = to.toString();
+    const targetSocketId = onlineUsers.get(targetRoom);
     const payload = { from: currentUserId, to: targetRoom, answer, targetReceiverId: targetRoom };
     io.to(targetRoom).emit('call:answer', payload);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('call:answer', payload);
+    }
   });
 
   socket.on('call:ice-candidate', ({ to, candidate }) => {
     if (!to) return;
     const targetRoom = to.toString();
+    const targetSocketId = onlineUsers.get(targetRoom);
     const payload = { from: currentUserId, to: targetRoom, candidate, targetReceiverId: targetRoom };
     io.to(targetRoom).emit('call:ice-candidate', payload);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('call:ice-candidate', payload);
+    }
   });
 };
