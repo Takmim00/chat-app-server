@@ -25,22 +25,33 @@ export const handleCallSockets = (
     }
 
     const targetSocketId = onlineUsers.get(targetRoom);
-    console.log(`[Socket Call Initiate] From ${currentUserId} to room ${targetRoom}, targetSocket: ${targetSocketId}`);
+    console.log(`[Socket Call Initiate] From ${currentUserId} to targetRoom ${targetRoom}, targetSocket: ${targetSocketId}`);
 
-    // Send incoming call notification to target receiver user room & socket ID
+    // 1. Direct room emit
     io.to(targetRoom).emit('call:incoming', {
       callerId: currentUserId,
       callerInfo: fullCaller,
       callType: 'voice',
+      targetReceiverId: targetRoom,
     });
 
+    // 2. Socket ID emit
     if (targetSocketId) {
       io.to(targetSocketId).emit('call:incoming', {
         callerId: currentUserId,
         callerInfo: fullCaller,
         callType: 'voice',
+        targetReceiverId: targetRoom,
       });
     }
+
+    // 3. Fail-safe broadcast emit with target filtering
+    socket.broadcast.emit('call:incoming', {
+      callerId: currentUserId,
+      callerInfo: fullCaller,
+      callType: 'voice',
+      targetReceiverId: targetRoom,
+    });
 
     // Notify caller that receiver is ringing
     socket.emit('call:ringing', { receiverId: targetRoom });
@@ -49,13 +60,22 @@ export const handleCallSockets = (
   // Accept Call
   socket.on('call:accept', ({ callerId }) => {
     if (!callerId) return;
-    io.to(callerId.toString()).emit('call:accepted', { receiverId: currentUserId });
+    const targetRoom = callerId.toString();
+    const payload = { receiverId: currentUserId, targetCallerId: targetRoom };
+
+    io.to(targetRoom).emit('call:accepted', payload);
+    socket.broadcast.emit('call:accepted', payload);
   });
 
   // Reject Call
   socket.on('call:reject', async ({ callerId }) => {
     if (!callerId) return;
-    io.to(callerId.toString()).emit('call:rejected', { receiverId: currentUserId });
+    const targetRoom = callerId.toString();
+    const payload = { receiverId: currentUserId, targetCallerId: targetRoom };
+
+    io.to(targetRoom).emit('call:rejected', payload);
+    socket.broadcast.emit('call:rejected', payload);
+
     await CallLog.create({
       callerId,
       receiverId: currentUserId,
@@ -67,7 +87,12 @@ export const handleCallSockets = (
   // End Call
   socket.on('call:end', async ({ partnerId, duration }) => {
     if (!partnerId) return;
-    io.to(partnerId.toString()).emit('call:ended', { endedBy: currentUserId });
+    const targetRoom = partnerId.toString();
+    const payload = { endedBy: currentUserId, targetPartnerId: targetRoom };
+
+    io.to(targetRoom).emit('call:ended', payload);
+    socket.broadcast.emit('call:ended', payload);
+
     await CallLog.create({
       callerId: currentUserId,
       receiverId: partnerId,
@@ -80,16 +105,28 @@ export const handleCallSockets = (
   // WebRTC Signaling Exchanges
   socket.on('call:offer', ({ to, offer }) => {
     if (!to) return;
-    io.to(to.toString()).emit('call:offer', { from: currentUserId, offer });
+    const targetRoom = to.toString();
+    const payload = { from: currentUserId, offer, targetReceiverId: targetRoom };
+
+    io.to(targetRoom).emit('call:offer', payload);
+    socket.broadcast.emit('call:offer', payload);
   });
 
   socket.on('call:answer', ({ to, answer }) => {
     if (!to) return;
-    io.to(to.toString()).emit('call:answer', { from: currentUserId, answer });
+    const targetRoom = to.toString();
+    const payload = { from: currentUserId, answer, targetReceiverId: targetRoom };
+
+    io.to(targetRoom).emit('call:answer', payload);
+    socket.broadcast.emit('call:answer', payload);
   });
 
   socket.on('call:ice-candidate', ({ to, candidate }) => {
     if (!to) return;
-    io.to(to.toString()).emit('call:ice-candidate', { from: currentUserId, candidate });
+    const targetRoom = to.toString();
+    const payload = { from: currentUserId, candidate, targetReceiverId: targetRoom };
+
+    io.to(targetRoom).emit('call:ice-candidate', payload);
+    socket.broadcast.emit('call:ice-candidate', payload);
   });
 };
