@@ -27,33 +27,19 @@ export const handleCallSockets = (
     const targetSocketId = onlineUsers.get(targetRoom);
     console.log(`[Socket Call Initiate] From ${currentUserId} to targetRoom ${targetRoom}, targetSocket: ${targetSocketId}`);
 
-    // 1. Direct room emit
-    io.to(targetRoom).emit('call:incoming', {
+    const payload = {
       callerId: currentUserId,
       callerInfo: fullCaller,
       callType: 'voice',
       targetReceiverId: targetRoom,
-    });
+      receiverId: targetRoom,
+    };
 
-    // 2. Socket ID emit
+    io.to(targetRoom).emit('call:incoming', payload);
     if (targetSocketId) {
-      io.to(targetSocketId).emit('call:incoming', {
-        callerId: currentUserId,
-        callerInfo: fullCaller,
-        callType: 'voice',
-        targetReceiverId: targetRoom,
-      });
+      io.to(targetSocketId).emit('call:incoming', payload);
     }
-
-    // 3. Fail-safe broadcast emit with target filtering
-    socket.broadcast.emit('call:incoming', {
-      callerId: currentUserId,
-      callerInfo: fullCaller,
-      callType: 'voice',
-      targetReceiverId: targetRoom,
-    });
-
-    // Notify caller that receiver is ringing
+    socket.broadcast.emit('call:incoming', payload);
     socket.emit('call:ringing', { receiverId: targetRoom });
   });
 
@@ -61,8 +47,13 @@ export const handleCallSockets = (
   socket.on('call:accept', ({ callerId }) => {
     if (!callerId) return;
     const targetRoom = callerId.toString();
-    const payload = { receiverId: currentUserId, targetCallerId: targetRoom };
+    const payload = {
+      receiverId: currentUserId,
+      callerId: targetRoom,
+      targetCallerId: targetRoom,
+    };
 
+    console.log(`[Socket Call Accept] From ${currentUserId} to caller ${targetRoom}`);
     io.to(targetRoom).emit('call:accepted', payload);
     socket.broadcast.emit('call:accepted', payload);
   });
@@ -71,8 +62,13 @@ export const handleCallSockets = (
   socket.on('call:reject', async ({ callerId }) => {
     if (!callerId) return;
     const targetRoom = callerId.toString();
-    const payload = { receiverId: currentUserId, targetCallerId: targetRoom };
+    const payload = {
+      receiverId: currentUserId,
+      callerId: targetRoom,
+      targetCallerId: targetRoom,
+    };
 
+    console.log(`[Socket Call Reject] From ${currentUserId} to caller ${targetRoom}`);
     io.to(targetRoom).emit('call:rejected', payload);
     socket.broadcast.emit('call:rejected', payload);
 
@@ -88,8 +84,13 @@ export const handleCallSockets = (
   socket.on('call:end', async ({ partnerId, duration }) => {
     if (!partnerId) return;
     const targetRoom = partnerId.toString();
-    const payload = { endedBy: currentUserId, targetPartnerId: targetRoom };
+    const payload = {
+      endedBy: currentUserId,
+      partnerId: targetRoom,
+      targetPartnerId: targetRoom,
+    };
 
+    console.log(`[Socket Call End] From ${currentUserId} to partner ${targetRoom}`);
     io.to(targetRoom).emit('call:ended', payload);
     socket.broadcast.emit('call:ended', payload);
 
@@ -106,7 +107,7 @@ export const handleCallSockets = (
   socket.on('call:offer', ({ to, offer }) => {
     if (!to) return;
     const targetRoom = to.toString();
-    const payload = { from: currentUserId, offer, targetReceiverId: targetRoom };
+    const payload = { from: currentUserId, to: targetRoom, offer, targetReceiverId: targetRoom };
 
     io.to(targetRoom).emit('call:offer', payload);
     socket.broadcast.emit('call:offer', payload);
@@ -115,7 +116,7 @@ export const handleCallSockets = (
   socket.on('call:answer', ({ to, answer }) => {
     if (!to) return;
     const targetRoom = to.toString();
-    const payload = { from: currentUserId, answer, targetReceiverId: targetRoom };
+    const payload = { from: currentUserId, to: targetRoom, answer, targetReceiverId: targetRoom };
 
     io.to(targetRoom).emit('call:answer', payload);
     socket.broadcast.emit('call:answer', payload);
@@ -124,7 +125,7 @@ export const handleCallSockets = (
   socket.on('call:ice-candidate', ({ to, candidate }) => {
     if (!to) return;
     const targetRoom = to.toString();
-    const payload = { from: currentUserId, candidate, targetReceiverId: targetRoom };
+    const payload = { from: currentUserId, to: targetRoom, candidate, targetReceiverId: targetRoom };
 
     io.to(targetRoom).emit('call:ice-candidate', payload);
     socket.broadcast.emit('call:ice-candidate', payload);
