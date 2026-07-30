@@ -56,7 +56,11 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/api', apiLimiter);
 
-// Health Check
+// Health Check & Root Endpoint
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'ok', message: 'Aurora Chat Server running healthy.' });
+});
+
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'Aurora Chat Server running healthy.' });
 });
