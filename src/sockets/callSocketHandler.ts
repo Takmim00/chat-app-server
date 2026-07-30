@@ -24,8 +24,7 @@ export const handleCallSockets = (
       }
     }
 
-    const targetSocketId = onlineUsers.get(targetRoom);
-    console.log(`[Socket Call Initiate] From ${currentUserId} to targetRoom ${targetRoom}, targetSocket: ${targetSocketId}`);
+    console.log(`[Socket Call Initiate] From ${currentUserId} to targetRoom ${targetRoom}`);
 
     const payload = {
       callerId: currentUserId,
@@ -35,11 +34,8 @@ export const handleCallSockets = (
       receiverId: targetRoom,
     };
 
+    // Only emit to the targeted receiver's room
     io.to(targetRoom).emit('call:incoming', payload);
-    if (targetSocketId) {
-      io.to(targetSocketId).emit('call:incoming', payload);
-    }
-    socket.broadcast.emit('call:incoming', payload);
     socket.emit('call:ringing', { receiverId: targetRoom });
   });
 
@@ -54,8 +50,8 @@ export const handleCallSockets = (
     };
 
     console.log(`[Socket Call Accept] From ${currentUserId} to caller ${targetRoom}`);
+    // Only emit to the caller's room
     io.to(targetRoom).emit('call:accepted', payload);
-    socket.broadcast.emit('call:accepted', payload);
   });
 
   // Reject Call
@@ -69,8 +65,8 @@ export const handleCallSockets = (
     };
 
     console.log(`[Socket Call Reject] From ${currentUserId} to caller ${targetRoom}`);
+    // Only emit to the caller's room
     io.to(targetRoom).emit('call:rejected', payload);
-    socket.broadcast.emit('call:rejected', payload);
 
     await CallLog.create({
       callerId,
@@ -91,8 +87,10 @@ export const handleCallSockets = (
     };
 
     console.log(`[Socket Call End] From ${currentUserId} to partner ${targetRoom}`);
+    // Emit to the partner's room
     io.to(targetRoom).emit('call:ended', payload);
-    socket.broadcast.emit('call:ended', payload);
+    // Also confirm back to the caller that the call has ended
+    socket.emit('call:ended', { ...payload, targetPartnerId: currentUserId });
 
     await CallLog.create({
       callerId: currentUserId,
@@ -103,31 +101,25 @@ export const handleCallSockets = (
     }).catch(() => {});
   });
 
-  // WebRTC Signaling Exchanges
+  // WebRTC Signaling Exchanges — only send to targeted user
   socket.on('call:offer', ({ to, offer }) => {
     if (!to) return;
     const targetRoom = to.toString();
     const payload = { from: currentUserId, to: targetRoom, offer, targetReceiverId: targetRoom };
-
     io.to(targetRoom).emit('call:offer', payload);
-    socket.broadcast.emit('call:offer', payload);
   });
 
   socket.on('call:answer', ({ to, answer }) => {
     if (!to) return;
     const targetRoom = to.toString();
     const payload = { from: currentUserId, to: targetRoom, answer, targetReceiverId: targetRoom };
-
     io.to(targetRoom).emit('call:answer', payload);
-    socket.broadcast.emit('call:answer', payload);
   });
 
   socket.on('call:ice-candidate', ({ to, candidate }) => {
     if (!to) return;
     const targetRoom = to.toString();
     const payload = { from: currentUserId, to: targetRoom, candidate, targetReceiverId: targetRoom };
-
     io.to(targetRoom).emit('call:ice-candidate', payload);
-    socket.broadcast.emit('call:ice-candidate', payload);
   });
 };
