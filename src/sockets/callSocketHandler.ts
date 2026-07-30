@@ -1,5 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import CallLog from '../models/CallLog.js';
+import User from '../models/User.js';
 
 export const handleCallSockets = (
   io: Server,
@@ -9,14 +10,26 @@ export const handleCallSockets = (
   const currentUserId = socket.data.userId;
 
   // Initiate call
-  socket.on('call:initiate', ({ receiverId, callerInfo }) => {
+  socket.on('call:initiate', async ({ receiverId, callerInfo }) => {
     if (!receiverId) return;
     const targetRoom = receiverId.toString();
+
+    let fullCaller = callerInfo;
+    if (!fullCaller || !fullCaller._id || !fullCaller.name) {
+      try {
+        const dbCaller = await User.findById(currentUserId).select('name username profilePic friendId');
+        if (dbCaller) fullCaller = dbCaller;
+      } catch (err) {
+        console.error('Failed to fetch caller info:', err);
+      }
+    }
+
+    console.log(`[Socket Call Initiate] From ${currentUserId} to room ${targetRoom}`);
 
     // Send incoming call notification to target receiver user room
     io.to(targetRoom).emit('call:incoming', {
       callerId: currentUserId,
-      callerInfo,
+      callerInfo: fullCaller,
       callType: 'voice',
     });
 
