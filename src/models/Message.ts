@@ -15,11 +15,13 @@ export interface IMessage extends Document {
   groupId?: mongoose.Types.ObjectId;
   senderId: mongoose.Types.ObjectId;
   content?: string;
-  type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'system';
+  type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'system' | 'call';
   fileUrl?: string;
   fileName?: string;
   fileSize?: number;
   fileType?: string;
+  callDuration?: number;   // seconds — for call type messages
+  callStatus?: 'completed' | 'missed' | 'rejected' | 'cancelled'; // for call type messages
   replyToId?: mongoose.Types.ObjectId;
   isEdited: boolean;
   isPinned: boolean;
@@ -41,13 +43,15 @@ const MessageSchema: Schema = new Schema(
     content: { type: String, default: '' },
     type: {
       type: String,
-      enum: ['text', 'image', 'video', 'audio', 'document', 'system'],
+      enum: ['text', 'image', 'video', 'audio', 'document', 'system', 'call'],
       default: 'text',
     },
     fileUrl: { type: String },
     fileName: { type: String },
     fileSize: { type: Number },
     fileType: { type: String },
+    callDuration: { type: Number },
+    callStatus: { type: String, enum: ['completed', 'missed', 'rejected', 'cancelled'] },
     replyToId: { type: Schema.Types.ObjectId, ref: 'Message' },
     isEdited: { type: Boolean, default: false },
     isPinned: { type: Boolean, default: false },
