@@ -33,8 +33,9 @@ const io = new Server(server, {
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true,
   },
-  pingTimeout: 60000,
-  pingInterval: 25000,
+  pingTimeout: 90000,   // 90s — Render idle timeout is ~30s, this keeps it alive
+  pingInterval: 20000,  // Ping every 20s to keep the connection warm
+  connectTimeout: 20000,
 });
 
 // Attach io to Express app for server-side socket broadcasts
