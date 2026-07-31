@@ -27,28 +27,35 @@ export const setupSocketIO = (io: Server) => {
     const userId = socket.data.userId;
     if (!userId) return;
 
-    // Register user in room & online map
+    // If this user had a previous socket registered, evict it from the room
+    // so the room contains ONLY the current, active socket
+    const previousSocketId = onlineUsers.get(userId);
+    if (previousSocketId && previousSocketId !== socket.id) {
+      console.log(`[Socket] User ${userId} reconnected — evicting old socket ${previousSocketId} from room`);
+      const prevSocket = io.sockets.sockets.get(previousSocketId);
+      if (prevSocket) {
+        // Remove old socket from the user's room so it no longer receives events
+        prevSocket.leave(userId);
+      }
+    }
+
+    // Register this socket as the active one for this user
     onlineUsers.set(userId, socket.id);
     socket.join(userId);
 
-    // Update user online status
+    // Update user online status in DB
     await User.findByIdAndUpdate(userId, { isOnline: true, lastSeen: new Date() });
-    io.emit('user:online', { userId, isOnline: true, lastSeen: new Date() });
+    io.emit('user:online', { userId, isOnline: true });
 
-    console.log(`[Socket Connected] User ${userId} joined room ${userId} with Socket ID ${socket.id}`);
+    console.log(`[Socket Connected] User ${userId} | SocketId ${socket.id} | Room: ${userId}`);
 
-    // Direct Messaging Events (Emit to target user room + socket ID)
+    // Direct Messaging Events
     socket.on('message:send', async (data) => {
       const { receiverId, message } = data;
       if (!receiverId) return;
 
       const targetId = receiverId.toString();
-      console.log(`[Socket message:send] From ${userId} to target room ${targetId}`);
-
-      // Emit to room (reaches all open tabs of receiver)
       io.to(targetId).emit('message:receive', message);
-
-      // Notify sender of delivery confirmation
       socket.emit('message:delivered', { messageId: message._id, receiverId: targetId });
     });
 
@@ -75,15 +82,19 @@ export const setupSocketIO = (io: Server) => {
     handleCallSockets(io, socket, onlineUsers);
     handleGroupSockets(io, socket, onlineUsers);
 
-    socket.on('disconnect', async () => {
-      // Only remove from onlineUsers if THIS socket is still the registered one
-      // (prevents race condition where a reconnected socket's entry gets deleted by the old socket)
+    socket.on('disconnect', async (reason) => {
+      console.log(`[Socket Disconnected] User ${userId} | Socket ${socket.id} | Reason: ${reason}`);
+
+      // Only mark offline if THIS socket is still the most recently registered one
+      // If user reconnected, a new socket is already registered — don't mark them offline
       if (onlineUsers.get(userId) === socket.id) {
         onlineUsers.delete(userId);
+        await User.findByIdAndUpdate(userId, { isOnline: false, lastSeen: new Date() });
+        io.emit('user:offline', { userId, isOnline: false, lastSeen: new Date() });
+        console.log(`[Socket] User ${userId} is now OFFLINE`);
+      } else {
+        console.log(`[Socket] User ${userId} has a newer socket registered — NOT marking offline`);
       }
-      await User.findByIdAndUpdate(userId, { isOnline: false, lastSeen: new Date() });
-      io.emit('user:offline', { userId, isOnline: false, lastSeen: new Date() });
-      console.log(`[Socket Disconnected] User ${userId} (Socket ${socket.id})`);
     });
   });
 };
