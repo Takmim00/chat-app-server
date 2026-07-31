@@ -160,9 +160,27 @@ export const joinGroupByInviteCode = async (req: AuthRequest, res: Response) => 
       group.members.push(userId);
       await group.save();
     }
-
     return res.status(200).json({ success: true, message: 'Joined group successfully.', group });
   } catch (error) {
     return res.status(500).json({ message: 'Failed to join group.' });
+  }
+};
+
+export const deleteGroup = async (req: AuthRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.userId;
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ message: 'Group not found.' });
+
+    if (group.ownerId.toString() !== userId) {
+      return res.status(403).json({ message: 'Only group owner can delete the group.' });
+    }
+
+    await Group.findByIdAndDelete(groupId);
+    return res.status(200).json({ success: true, message: 'Group deleted successfully.' });
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to delete group.' });
   }
 };
