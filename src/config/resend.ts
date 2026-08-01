@@ -29,9 +29,24 @@ export const sendOtpEmail = async (email: string, otp: string) => {
     });
 
     console.log('[RESEND API Response]:', response);
-    return { success: true, response };
-  } catch (error) {
-    console.error('❌ [RESEND API Error]:', error);
-    return { success: true, fallback: true };
+
+    if (response.error) {
+      console.error('❌ [RESEND API Error]:', response.error);
+      const isSandboxRestriction =
+        response.error.message?.toLowerCase().includes('only send testing emails') ||
+        response.error.name === 'validation_error';
+
+      return {
+        success: false,
+        error: response.error,
+        isSandboxRestriction,
+        message: response.error.message || 'Resend email delivery failed',
+      };
+    }
+
+    return { success: true, data: response.data };
+  } catch (error: any) {
+    console.error('❌ [RESEND API Error Exception]:', error);
+    return { success: false, error, message: error?.message || 'Failed to trigger email' };
   }
 };
