@@ -68,7 +68,15 @@ const corsOptions: cors.CorsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
 };
 
-app.use(cors(corsOptions));
+app.use((req, res, next) => {
+  cors(corsOptions)(req, res, (err) => {
+    if (err) return next(err);
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+    next();
+  });
+});
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/api', apiLimiter);
