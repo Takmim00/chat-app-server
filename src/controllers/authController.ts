@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import User from '../models/User.js';
 import { generateOtp, hashOtp } from '../utils/generateOtp.js';
 import { sendOtpEmail } from '../config/resend.js';
-import { generateToken } from '../utils/jwt.js';
+import { generateToken, verifyToken } from '../utils/jwt.js';
 import { generateFriendId } from '../utils/generateFriendId.js';
 import { AuthRequest } from '../middleware/authMiddleware.js';
 
@@ -113,5 +113,27 @@ export const getCurrentUser = async (req: AuthRequest, res: Response) => {
     return res.status(200).json({ success: true, user });
   } catch (error) {
     return res.status(500).json({ message: 'Error fetching current user profile.' });
+  }
+};
+
+export const refreshToken = async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : req.cookies?.token;
+
+    if (!token) {
+      return res.status(401).json({ message: 'Refresh token required.' });
+    }
+
+    const decoded = verifyToken(token);
+    const user = await User.findById(decoded.userId);
+    if (!user) {
+      return res.status(401).json({ message: 'User not found.' });
+    }
+
+    const newToken = generateToken(user._id.toString(), true);
+    return res.status(200).json({ success: true, token: newToken });
+  } catch (error) {
+    return res.status(401).json({ message: 'Invalid or expired refresh token.' });
   }
 };
