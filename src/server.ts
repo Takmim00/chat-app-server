@@ -30,11 +30,13 @@ const io = new Server(server, {
     origin: (origin, callback) => {
       callback(null, true);
     },
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
     credentials: true,
   },
-  pingTimeout: 90000,   // 90s — Render idle timeout is ~30s, this keeps it alive
-  pingInterval: 20000,  // Ping every 20s to keep the connection warm
+  transports: ['websocket', 'polling'],
+  pingTimeout: 60000,
+  pingInterval: 25000,
   connectTimeout: 20000,
 });
 
