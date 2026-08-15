@@ -112,6 +112,17 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Recipient chatId or groupId is required.' });
     }
 
+    if (chatId) {
+      const recipient = await User.findById(chatId);
+      const sender = await User.findById(senderId);
+      if (
+        recipient?.blockedUsers.some((id) => id.toString() === senderId?.toString()) ||
+        sender?.blockedUsers.some((id) => id.toString() === chatId.toString())
+      ) {
+        return res.status(403).json({ message: 'Cannot send message. User is blocked.' });
+      }
+    }
+
     const message = await Message.create({
       chatId: chatId || undefined,
       groupId: groupId || undefined,
