@@ -23,6 +23,23 @@ export const getDirectMessages = async (req: AuthRequest, res: Response) => {
       query.createdAt = { $lt: new Date(before) };
     }
 
+    // Mark unseen messages sent by partnerId as seen by current userId
+    await Message.updateMany(
+      {
+        senderId: partnerId,
+        chatId: userId,
+        'seenBy.userId': { $ne: userId },
+      },
+      {
+        $addToSet: { seenBy: { userId, timestamp: new Date() } },
+      }
+    );
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(partnerId.toString()).emit('message:all-seen', { seenByUserId: userId });
+    }
+
     const messages = await Message.find(query)
       .populate('senderId', 'name username profilePic')
       .populate('replyToId', 'content senderId fileUrl type')
