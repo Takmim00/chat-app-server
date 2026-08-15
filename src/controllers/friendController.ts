@@ -32,10 +32,36 @@ export const searchByFriendId = async (req: AuthRequest, res: Response) => {
       .select('_id name username profilePic bio friendId isOnline')
       .limit(15);
 
+    const currentUser = await User.findById(req.userId);
+    const friendIdSet = new Set(currentUser?.friends.map((id) => id.toString()));
+
+    const pendingRequests = await FriendRequest.find({
+      $or: [
+        { senderId: req.userId, status: 'pending' },
+        { receiverId: req.userId, status: 'pending' },
+      ],
+    });
+
+    const pendingSet = new Set(
+      pendingRequests.map((r) =>
+        r.senderId.toString() === req.userId ? r.receiverId.toString() : r.senderId.toString()
+      )
+    );
+
+    const usersWithStatus = users.map((u) => {
+      const uObj = u.toObject();
+      const uId = u._id.toString();
+      return {
+        ...uObj,
+        isFriend: friendIdSet.has(uId),
+        isPending: pendingSet.has(uId),
+      };
+    });
+
     return res.status(200).json({
       success: true,
-      users,
-      user: users[0] || null, // for backward compatibility
+      users: usersWithStatus,
+      user: usersWithStatus[0] || null, // for backward compatibility
     });
   } catch (error) {
     return res.status(500).json({ message: 'Error searching for user.' });
