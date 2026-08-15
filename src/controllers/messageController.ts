@@ -115,10 +115,10 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
     if (chatId) {
       const recipient = await User.findById(chatId);
       const sender = await User.findById(senderId);
-      if (
-        recipient?.blockedUsers.some((id) => id.toString() === senderId?.toString()) ||
-        sender?.blockedUsers.some((id) => id.toString() === chatId.toString())
-      ) {
+      const isRecipientBlocked = Array.isArray(recipient?.blockedUsers) && recipient.blockedUsers.some((id) => id.toString() === senderId?.toString());
+      const isSenderBlocked = Array.isArray(sender?.blockedUsers) && sender.blockedUsers.some((id) => id.toString() === chatId.toString());
+
+      if (isRecipientBlocked || isSenderBlocked) {
         return res.status(403).json({ message: 'Cannot send message. User is blocked.' });
       }
     }
