@@ -5,25 +5,38 @@ import FriendRequest from '../models/FriendRequest.js';
 
 export const searchByFriendId = async (req: AuthRequest, res: Response) => {
   try {
-    const { friendId } = req.query;
-    if (!friendId || typeof friendId !== 'string') {
-      return res.status(400).json({ message: 'Friend ID query parameter is required.' });
+    const { friendId, query } = req.query;
+    const searchTerm = ((query || friendId) as string || '').trim();
+
+    if (!searchTerm) {
+      return res.status(400).json({ message: 'Search query is required.' });
     }
 
-    const formattedId = friendId.trim().toUpperCase();
-    const user = await User.findOne({ friendId: formattedId }).select(
-      '_id name username profilePic bio friendId isOnline'
-    );
+    const isExactId = /^AUR-[A-Z0-9]+$/i.test(searchTerm);
 
-    if (!user) {
-      return res.status(404).json({ message: 'No user found with this Friend ID.' });
+    let filter: any = {
+      _id: { $ne: req.userId },
+    };
+
+    if (isExactId) {
+      filter.friendId = searchTerm.toUpperCase();
+    } else {
+      filter.$or = [
+        { friendId: searchTerm.toUpperCase() },
+        { name: { $regex: searchTerm, $options: 'i' } },
+        { username: { $regex: searchTerm, $options: 'i' } },
+      ];
     }
 
-    if (user._id.toString() === req.userId) {
-      return res.status(400).json({ message: 'You cannot search or add yourself.' });
-    }
+    const users = await User.find(filter)
+      .select('_id name username profilePic bio friendId isOnline')
+      .limit(15);
 
-    return res.status(200).json({ success: true, user });
+    return res.status(200).json({
+      success: true,
+      users,
+      user: users[0] || null, // for backward compatibility
+    });
   } catch (error) {
     return res.status(500).json({ message: 'Error searching for user.' });
   }
