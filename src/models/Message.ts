@@ -23,6 +23,8 @@ export interface IMessage extends Document {
   callDuration?: number;   // seconds — for call type messages
   callStatus?: 'completed' | 'missed' | 'rejected' | 'cancelled'; // for call type messages
   replyToId?: mongoose.Types.ObjectId;
+  isForwarded: boolean;
+  forwardedFrom?: mongoose.Types.ObjectId;
   isEdited: boolean;
   isPinned: boolean;
   deletedFor: mongoose.Types.ObjectId[];
@@ -53,6 +55,8 @@ const MessageSchema: Schema = new Schema(
     callDuration: { type: Number },
     callStatus: { type: String, enum: ['completed', 'missed', 'rejected', 'cancelled'] },
     replyToId: { type: Schema.Types.ObjectId, ref: 'Message' },
+    isForwarded: { type: Boolean, default: false },
+    forwardedFrom: { type: Schema.Types.ObjectId, ref: 'User' },
     isEdited: { type: Boolean, default: false },
     isPinned: { type: Boolean, default: false },
     deletedFor: [{ type: Schema.Types.ObjectId, ref: 'User' }],
@@ -82,5 +86,6 @@ const MessageSchema: Schema = new Schema(
 
 MessageSchema.index({ chatId: 1, createdAt: 1 });
 MessageSchema.index({ groupId: 1, createdAt: 1 });
+MessageSchema.index({ content: 'text' });
 
 export default mongoose.model<IMessage>('Message', MessageSchema);

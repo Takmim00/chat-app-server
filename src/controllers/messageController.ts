@@ -8,19 +8,36 @@ export const getDirectMessages = async (req: AuthRequest, res: Response) => {
   try {
     const { partnerId } = req.params;
     const userId = req.userId;
+    const { before, limit: limitStr } = req.query;
+    const limit = Math.min(parseInt(limitStr as string) || 50, 100);
 
-    const messages = await Message.find({
+    let query: any = {
       $or: [
         { senderId: userId, chatId: partnerId },
         { senderId: partnerId, chatId: userId },
       ],
       deletedFor: { $ne: userId },
-    })
+    };
+
+    if (before && typeof before === 'string') {
+      query.createdAt = { $lt: new Date(before) };
+    }
+
+    const messages = await Message.find(query)
       .populate('senderId', 'name username profilePic')
       .populate('replyToId', 'content senderId fileUrl type')
-      .sort({ createdAt: 1 });
+      .populate('forwardedFrom', 'name username profilePic')
+      .sort({ createdAt: -1 })
+      .limit(limit + 1);
 
-    return res.status(200).json({ success: true, messages });
+    const hasMore = messages.length > limit;
+    const result = hasMore ? messages.slice(0, limit) : messages;
+
+    return res.status(200).json({ 
+      success: true, 
+      messages: result.reverse(), 
+      hasMore 
+    });
   } catch (error) {
     return res.status(500).json({ message: 'Failed to fetch messages.' });
   }
@@ -30,6 +47,8 @@ export const getGroupMessages = async (req: AuthRequest, res: Response) => {
   try {
     const { groupId } = req.params;
     const userId = req.userId;
+    const { before, limit: limitStr } = req.query;
+    const limit = Math.min(parseInt(limitStr as string) || 50, 100);
 
     // Verify membership
     const group = await Group.findOne({ _id: groupId, members: userId });
@@ -37,16 +56,31 @@ export const getGroupMessages = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Access denied. You are not a member of this group.' });
     }
 
-    const messages = await Message.find({
+    let query: any = {
       groupId,
       deletedFor: { $ne: userId },
-    })
+    };
+
+    if (before && typeof before === 'string') {
+      query.createdAt = { $lt: new Date(before) };
+    }
+
+    const messages = await Message.find(query)
       .populate('senderId', 'name username profilePic')
       .populate('replyToId', 'content senderId fileUrl type')
       .populate('mentions', 'name username')
-      .sort({ createdAt: 1 });
+      .populate('forwardedFrom', 'name username profilePic')
+      .sort({ createdAt: -1 })
+      .limit(limit + 1);
 
-    return res.status(200).json({ success: true, messages });
+    const hasMore = messages.length > limit;
+    const result = hasMore ? messages.slice(0, limit) : messages;
+
+    return res.status(200).json({ 
+      success: true, 
+      messages: result.reverse(), 
+      hasMore 
+    });
   } catch (error) {
     return res.status(500).json({ message: 'Failed to fetch group messages.' });
   }
@@ -204,5 +238,95 @@ export const reactToMessage = async (req: AuthRequest, res: Response) => {
     return res.status(200).json({ success: true, message });
   } catch (error) {
     return res.status(500).json({ message: 'Failed to react to message.' });
+  }
+};
+
+export const forwardMessage = async (req: AuthRequest, res: Response) => {
+  try {
+    const { messageId, targetChatId, targetGroupId } = req.body;
+    const userId = req.userId;
+
+    if (!messageId) {
+      return res.status(400).json({ message: 'Message ID is required.' });
+    }
+    if (!targetChatId && !targetGroupId) {
+      return res.status(400).json({ message: 'Target chat or group ID is required.' });
+    }
+
+    const originalMessage = await Message.findById(messageId);
+    if (!originalMessage) {
+      return res.status(404).json({ message: 'Original message not found.' });
+    }
+
+    const forwardedMsg = await Message.create({
+      chatId: targetChatId || undefined,
+      groupId: targetGroupId || undefined,
+      senderId: userId,
+      content: originalMessage.content,
+      type: originalMessage.type,
+      fileUrl: originalMessage.fileUrl,
+      fileName: originalMessage.fileName,
+      fileSize: originalMessage.fileSize,
+      fileType: originalMessage.fileType,
+      isForwarded: true,
+      forwardedFrom: typeof originalMessage.senderId === 'object' ? (originalMessage.senderId as any)._id : originalMessage.senderId,
+      seenBy: [{ userId, timestamp: new Date() }],
+      deliveredTo: [{ userId, timestamp: new Date() }],
+    });
+
+    const populated = await Message.findById(forwardedMsg._id)
+      .populate('senderId', 'name username profilePic')
+      .populate('forwardedFrom', 'name username profilePic');
+
+    // Broadcast via socket
+    const io = req.app.get('io');
+    if (io) {
+      if (targetChatId) {
+        io.to(targetChatId.toString()).emit('message:receive', populated);
+      } else if (targetGroupId) {
+        io.to(`group:${targetGroupId}`).emit('group:message-receive', { groupId: targetGroupId, message: populated });
+      }
+    }
+
+    return res.status(201).json({ success: true, message: populated });
+  } catch (error) {
+    console.error('Forward Message Error:', error);
+    return res.status(500).json({ message: 'Failed to forward message.' });
+  }
+};
+
+export const searchMessages = async (req: AuthRequest, res: Response) => {
+  try {
+    const { query, partnerId, groupId } = req.query;
+    const userId = req.userId;
+
+    if (!query || typeof query !== 'string') {
+      return res.status(400).json({ message: 'Search query is required.' });
+    }
+
+    let filter: any = {
+      content: { $regex: query, $options: 'i' },
+      deletedFor: { $ne: userId },
+      isDeletedForEveryone: { $ne: true },
+    };
+
+    if (partnerId) {
+      filter.$or = [
+        { senderId: userId, chatId: partnerId },
+        { senderId: partnerId, chatId: userId },
+      ];
+    } else if (groupId) {
+      filter.groupId = groupId;
+    }
+
+    const messages = await Message.find(filter)
+      .populate('senderId', 'name username profilePic')
+      .sort({ createdAt: -1 })
+      .limit(50);
+
+    return res.status(200).json({ success: true, messages });
+  } catch (error) {
+    console.error('Search Messages Error:', error);
+    return res.status(500).json({ message: 'Failed to search messages.' });
   }
 };

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import User from '../models/User.js';
-import { generateOtp } from '../utils/generateOtp.js';
+import { generateOtp, hashOtp } from '../utils/generateOtp.js';
 import { sendOtpEmail } from '../config/resend.js';
 import { generateToken } from '../utils/jwt.js';
 import { generateFriendId } from '../utils/generateFriendId.js';
@@ -28,11 +28,11 @@ export const requestOtp = async (req: Request, res: Response) => {
         name: email.split('@')[0],
         username: email.split('@')[0] + Math.floor(100 + Math.random() * 900),
         friendId,
-        otp,
+        otp: hashOtp(otp),
         otpExpires,
       });
     } else {
-      user.otp = otp;
+      user.otp = hashOtp(otp);
       user.otpExpires = otpExpires;
     }
 
@@ -67,7 +67,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'OTP has expired. Please request a new code.' });
     }
 
-    if (user.otp !== otp) {
+    if (user.otp !== hashOtp(otp)) {
       return res.status(400).json({ message: 'Incorrect OTP code.' });
     }
 
