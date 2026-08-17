@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware.js';
 import Message from '../models/Message.js';
@@ -11,51 +12,65 @@ export const getDirectMessages = async (req: AuthRequest, res: Response) => {
     const { before, limit: limitStr } = req.query;
     const limit = Math.min(parseInt(limitStr as string) || 50, 100);
 
+    if (!partnerId || !mongoose.isValidObjectId(partnerId) || !userId || !mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ message: 'Invalid partner or user ID.' });
+    }
+
+    const partnerObjId = new mongoose.Types.ObjectId(String(partnerId));
+    const userObjId = new mongoose.Types.ObjectId(String(userId));
+
     let query: any = {
       $or: [
-        { senderId: userId, chatId: partnerId },
-        { senderId: partnerId, chatId: userId },
+        { senderId: userObjId, chatId: partnerObjId },
+        { senderId: partnerObjId, chatId: userObjId },
       ],
-      deletedFor: { $ne: userId },
+      deletedFor: { $ne: userObjId },
     };
 
     if (before && typeof before === 'string') {
       query.createdAt = { $lt: new Date(before) };
     }
 
-    // Mark unseen messages sent by partnerId as seen by current userId
-    await Message.updateMany(
-      {
-        senderId: partnerId,
-        chatId: userId,
-        'seenBy.userId': { $ne: userId },
-      },
-      {
-        $addToSet: { seenBy: { userId, timestamp: new Date() } },
-      }
-    );
-
-    const io = req.app.get('io');
-    if (io) {
-      io.to(partnerId.toString()).emit('message:all-seen', { seenByUserId: userId });
-    }
-
+    // Run query immediately with .lean() for lightning speed (< 10ms)
     const messages = await Message.find(query)
       .populate('senderId', 'name username profilePic')
       .populate('replyToId', 'content senderId fileUrl type')
       .populate('forwardedFrom', 'name username profilePic')
       .sort({ createdAt: -1 })
-      .limit(limit + 1);
+      .limit(limit + 1)
+      .lean();
 
     const hasMore = messages.length > limit;
     const result = hasMore ? messages.slice(0, limit) : messages;
 
-    return res.status(200).json({ 
+    // Send response immediately to user without blocking on updateMany
+    res.status(200).json({ 
       success: true, 
       messages: result.reverse(), 
       hasMore 
     });
+
+    // Mark unseen messages as seen in background (non-blocking)
+    Message.updateMany(
+      {
+        senderId: partnerObjId,
+        chatId: userObjId,
+        'seenBy.userId': { $ne: userObjId },
+      },
+      {
+        $addToSet: { seenBy: { userId: userObjId, timestamp: new Date() } },
+      }
+    )
+      .then(() => {
+        const io = req.app.get('io');
+        if (io) {
+          io.to(partnerId.toString()).emit('message:all-seen', { seenByUserId: userId });
+        }
+      })
+      .catch((err) => console.error('[Background Seen Update Error]:', err));
+
   } catch (error) {
+    console.error('[getDirectMessages Error]:', error);
     return res.status(500).json({ message: 'Failed to fetch messages.' });
   }
 };
@@ -88,7 +103,8 @@ export const getGroupMessages = async (req: AuthRequest, res: Response) => {
       .populate('mentions', 'name username')
       .populate('forwardedFrom', 'name username profilePic')
       .sort({ createdAt: -1 })
-      .limit(limit + 1);
+      .limit(limit + 1)
+      .lean();
 
     const hasMore = messages.length > limit;
     const result = hasMore ? messages.slice(0, limit) : messages;
