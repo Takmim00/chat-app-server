@@ -84,8 +84,10 @@ const MessageSchema: Schema = new Schema(
   { timestamps: true }
 );
 
-MessageSchema.index({ chatId: 1, createdAt: 1 });
-MessageSchema.index({ groupId: 1, createdAt: 1 });
+MessageSchema.index({ chatId: 1, createdAt: -1 });
+MessageSchema.index({ groupId: 1, createdAt: -1 });
+MessageSchema.index({ senderId: 1, chatId: 1, createdAt: -1 });
+MessageSchema.index({ chatId: 1, senderId: 1, createdAt: -1 });
 MessageSchema.index({ content: 'text' });
 
 export default mongoose.model<IMessage>('Message', MessageSchema);
