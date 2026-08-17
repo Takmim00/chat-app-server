@@ -1,4 +1,5 @@
 import { Server, Socket } from 'socket.io';
+import mongoose from 'mongoose';
 import { verifyToken } from '../utils/jwt.js';
 import User from '../models/User.js';
 import Message from '../models/Message.js';
@@ -64,6 +65,9 @@ export const setupSocketIO = (io: Server) => {
     });
 
     socket.on('message:seen', async ({ messageId, senderId }) => {
+      // Skip temp client-side IDs that aren't valid MongoDB ObjectIds
+      if (!messageId || !mongoose.isValidObjectId(messageId)) return;
+
       await Message.findByIdAndUpdate(messageId, {
         $addToSet: { seenBy: { userId, timestamp: new Date() } },
       });
